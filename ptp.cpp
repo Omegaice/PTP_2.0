@@ -353,23 +353,44 @@ uint8_t PTP::SendCommandPacket( const uint16_t opcode, const uint8_t parameters,
 	idTransaction++;
 
 	// Setup Buffer
-	uint8_t		cmd[PTP_USB_BULK_HDR_LEN + 12];
-	memset( cmd, 0, sizeof(cmd) );
+	uint8_t	buffer[PTP_USB_BULK_HDR_LEN + 12];
+	memset( buffer, 0, sizeof(buffer) );
 
 	// Fill Buffer
 	uint32_t length = PTP_USB_BULK_HDR_LEN + ( parameters * 4 );
-	memcpy( cmd, &length, sizeof(uint32_t));
+	memcpy( buffer, &length, sizeof(uint32_t));
 
 	uint16_t value = PTP_USB_CONTAINER_COMMAND;
-	memcpy( cmd + PTP_CONTAINER_CONTYPE_OFF, &value, sizeof(uint16_t));
-	memcpy( cmd + PTP_CONTAINER_OPCODE_OFF, &opcode, sizeof(uint16_t));
-	memcpy( cmd + PTP_CONTAINER_TRANSID_OFF, &idTransaction, sizeof(uint32_t));
+	memcpy( buffer + PTP_CONTAINER_CONTYPE_OFF, &value, sizeof(uint16_t));
+	memcpy( buffer + PTP_CONTAINER_OPCODE_OFF, &opcode, sizeof(uint16_t));
+	memcpy( buffer + PTP_CONTAINER_TRANSID_OFF, &idTransaction, sizeof(uint32_t));
 	if( data != 0 ){
-		memcpy( cmd + PTP_CONTAINER_PAYLOAD_OFF, data, sizeof(uint32_t) * parameters);
+		memcpy( buffer + PTP_CONTAINER_PAYLOAD_OFF, data, sizeof(uint32_t) * parameters);
 	}
 
 	// Send Data
-	return pUsb->outTransfer( devAddress, epInfo[epDataOutIndex].epAddr, (uint8_t)length, cmd );
+	return pUsb->outTransfer( devAddress, epInfo[epDataOutIndex].epAddr, (uint8_t)length, buffer );
+}
+
+uint8_t PTP::SendDataPacket( const uint16_t opcode, const uint32_t size, void* data ){
+	// Setup Buffer
+	uint8_t	buffer[PTP_MAX_RX_BUFFER_LEN];
+	memset( buffer, 0, sizeof(buffer) );
+
+	// Fill Buffer
+	uint32_t length = PTP_USB_BULK_HDR_LEN + size;
+	memcpy( buffer, &length, sizeof(uint32_t));
+
+	uint16_t value = PTP_USB_CONTAINER_DATA;
+	memcpy( buffer + PTP_CONTAINER_CONTYPE_OFF, &value, sizeof(uint16_t));
+	memcpy( buffer + PTP_CONTAINER_OPCODE_OFF, &opcode, sizeof(uint16_t));
+	memcpy( buffer + PTP_CONTAINER_TRANSID_OFF, &idTransaction, sizeof(uint32_t));
+	if( data != 0 ){
+		memcpy( buffer + PTP_USB_BULK_HDR_LEN, data, size);
+	}
+
+	// Send Data
+	return pUsb->outTransfer( devAddress, epInfo[epDataOutIndex].epAddr, (uint8_t)length, buffer );
 }
 
 uint16_t PTP::Transaction( uint16_t opcode, OperFlags *flags, uint32_t *params = NULL, void *pVoid = NULL ) {
@@ -380,59 +401,11 @@ uint16_t PTP::Transaction( uint16_t opcode, OperFlags *flags, uint32_t *params =
 	}
 
 	{
-		uint8_t		data[PTP_MAX_RX_BUFFER_LEN];
-
 		if( flags->txOperation ) {
-			if( flags->typeOfVoid && !pVoid ) {
-				PTPTRACE( "Transaction: pVoid is NULL\n" );
+			uint8_t rcode = SendDataPacket( opcode, flags->dataSize, pVoid );
+			if( rcode ) {
+				PTPTRACE2( "Transaction: Command block send error", rcode );
 				return PTP_RC_GeneralError;
-			}
-			ZerroMemory( PTP_MAX_RX_BUFFER_LEN, data );
-
-			uint32_t	bytes_left =	( flags->typeOfVoid == 3 ) ? PTP_USB_BULK_HDR_LEN + flags->dataSize :
-										( ( flags->typeOfVoid == 1 ) ? PTP_USB_BULK_HDR_LEN + ( ( PTPDataSupplier * )pVoid )->GetDataSize() : 12 );
-
-			// Make data PTP container header
-			*( ( uint32_t * )data ) = bytes_left;
-			uint16_to_char( PTP_USB_CONTAINER_DATA,	( unsigned char * )( data + PTP_CONTAINER_CONTYPE_OFF ) );		// type
-			uint16_to_char( opcode,	( unsigned char * )( data + PTP_CONTAINER_OPCODE_OFF ) );			// code
-			uint32_to_char( idTransaction,	( unsigned char * )( data + PTP_CONTAINER_TRANSID_OFF ) );		// transaction id
-
-			uint16_t	len;
-
-			if( flags->typeOfVoid == 1 ) {
-				len = ( bytes_left < PTP_MAX_RX_BUFFER_LEN ) ? bytes_left : PTP_MAX_RX_BUFFER_LEN;
-			}
-
-			if( flags->typeOfVoid == 3 ) {
-				uint8_t		*p1 = ( data + PTP_USB_BULK_HDR_LEN );
-				uint8_t		*p2 = ( uint8_t * )pVoid;
-
-				for( uint8_t i = flags->dataSize; i; i--, p1++, p2++ ) {
-					*p1 = *p2;
-				}
-
-				len = PTP_USB_BULK_HDR_LEN + flags->dataSize;
-			}
-			bool first_time = true;
-
-			while( bytes_left ) {
-				if( flags->typeOfVoid == 1 )
-					( ( PTPDataSupplier * )pVoid )->GetData(	( first_time ) ? len - PTP_USB_BULK_HDR_LEN : len,
-							( first_time ) ? ( data + PTP_USB_BULK_HDR_LEN ) : data );
-
-				rcode = pUsb->outTransfer( devAddress, epInfo[epDataOutIndex].epAddr, len, data );
-
-				if( rcode ) {
-					PTPTRACE2( "Transaction: Data block send error.", rcode );
-					return PTP_RC_GeneralError;
-				}
-
-				bytes_left -= len;
-
-				len = ( bytes_left < PTP_MAX_RX_BUFFER_LEN ) ? bytes_left : PTP_MAX_RX_BUFFER_LEN;
-
-				first_time = false;
 			}
 		}
 
@@ -443,6 +416,7 @@ uint16_t PTP::Transaction( uint16_t opcode, OperFlags *flags, uint32_t *params =
 		uint16_t	loops = 0;			// Number of loops necessary to get all the data from device
 		uint8_t		timeoutcnt = 0;
 
+		uint8_t		data[PTP_MAX_RX_BUFFER_LEN];
 		while( 1 ) {
 			ZerroMemory( PTP_MAX_RX_BUFFER_LEN, data );
 
