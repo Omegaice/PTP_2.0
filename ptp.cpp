@@ -348,27 +348,28 @@ void PTP::Task() {
 	}
 }
 
-uint8_t PTP::SendCommandPacket( const uint16_t opcode, const uint8_t parameters, uint32_t *data ) {
+uint8_t PTP::SendCommandPacket( const uint16_t opcode, const uint8_t parameters, uint32_t *data = 0) {
+	// Increment transaction id
+	idTransaction++;
+
+	// Setup Buffer
 	uint8_t		cmd[PTP_USB_BULK_HDR_LEN + 12];
-	ZerroMemory( PTP_USB_BULK_HDR_LEN + 12, cmd );
+	memset( cmd, 0, sizeof(cmd) );
 
-	uint16_to_char( PTP_USB_CONTAINER_COMMAND,	( unsigned char * )( cmd + PTP_CONTAINER_CONTYPE_OFF ) );			// type
-	uint16_to_char( opcode,	( unsigned char * )( cmd + PTP_CONTAINER_OPCODE_OFF ) );			// code
-	uint32_to_char( ++idTransaction,	( unsigned char * )( cmd + PTP_CONTAINER_TRANSID_OFF ) );			// transaction id
+	// Fill Buffer
+	uint32_t length = PTP_USB_BULK_HDR_LEN + ( parameters * 4 );
+	memcpy( cmd, &length, sizeof(uint32_t));
 
-	uint8_t		n = parameters, len;
-
-	if( data && *data ) {
-		*( ( uint8_t * )cmd ) = len = PTP_USB_BULK_HDR_LEN + ( n << 2 );
-
-		for( uint32_t *p1 = ( uint32_t * )( cmd + PTP_CONTAINER_PAYLOAD_OFF ), *p2 = ( uint32_t * )data; n--; p1++, p2++ ) {
-			uint32_to_char( *p2, ( unsigned char * )p1 );
-		}
-	} else {
-		*( ( uint8_t * )cmd ) = len = PTP_USB_BULK_HDR_LEN;
+	uint16_t value = PTP_USB_CONTAINER_COMMAND;
+	memcpy( cmd + PTP_CONTAINER_CONTYPE_OFF, &value, sizeof(uint16_t));
+	memcpy( cmd + PTP_CONTAINER_OPCODE_OFF, &opcode, sizeof(uint16_t));
+	memcpy( cmd + PTP_CONTAINER_TRANSID_OFF, &idTransaction, sizeof(uint32_t));
+	if( data != 0 ){
+		memcpy( cmd + PTP_CONTAINER_PAYLOAD_OFF, data, sizeof(uint32_t) * parameters);
 	}
 
-	return pUsb->outTransfer( devAddress, epInfo[epDataOutIndex].epAddr, len, cmd );
+	// Send Data
+	return pUsb->outTransfer( devAddress, epInfo[epDataOutIndex].epAddr, (uint8_t)length, cmd );
 }
 
 uint16_t PTP::Transaction( uint16_t opcode, OperFlags *flags, uint32_t *params = NULL, void *pVoid = NULL ) {
