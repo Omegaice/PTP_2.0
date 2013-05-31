@@ -348,37 +348,36 @@ void PTP::Task() {
 	}
 }
 
-uint16_t PTP::Transaction( uint16_t opcode, OperFlags *flags, uint32_t *params = NULL, void *pVoid = NULL ) {
-	uint8_t		rcode;
-	{
-		uint8_t		cmd[PTP_USB_BULK_HDR_LEN + 12];		// header + 3 uint32_t parameters
+uint8_t PTP::SendCommandPacket( const uint16_t opcode, const uint8_t parameters, uint32_t *data ) {
+	uint8_t		cmd[PTP_USB_BULK_HDR_LEN + 12];
+	ZerroMemory( PTP_USB_BULK_HDR_LEN + 12, cmd );
 
-		ZerroMemory( PTP_USB_BULK_HDR_LEN + 12, cmd );
+	uint16_to_char( PTP_USB_CONTAINER_COMMAND,	( unsigned char * )( cmd + PTP_CONTAINER_CONTYPE_OFF ) );			// type
+	uint16_to_char( opcode,	( unsigned char * )( cmd + PTP_CONTAINER_OPCODE_OFF ) );			// code
+	uint32_to_char( ++idTransaction,	( unsigned char * )( cmd + PTP_CONTAINER_TRANSID_OFF ) );			// transaction id
 
-		// Make command PTP container header
-		uint16_to_char( PTP_USB_CONTAINER_COMMAND,	( unsigned char * )( cmd + PTP_CONTAINER_CONTYPE_OFF ) );			// type
-		uint16_to_char( opcode,	( unsigned char * )( cmd + PTP_CONTAINER_OPCODE_OFF ) );			// code
-		uint32_to_char( ++idTransaction,	( unsigned char * )( cmd + PTP_CONTAINER_TRANSID_OFF ) );			// transaction id
+	uint8_t		n = parameters, len;
 
-		uint8_t		n = flags->opParams, len;
+	if( data && *data ) {
+		*( ( uint8_t * )cmd ) = len = PTP_USB_BULK_HDR_LEN + ( n << 2 );
 
-		if( params && *params ) {
-			*( ( uint8_t * )cmd ) = len = PTP_USB_BULK_HDR_LEN + ( n << 2 );
-
-			for( uint32_t *p1 = ( uint32_t * )( cmd + PTP_CONTAINER_PAYLOAD_OFF ), *p2 = ( uint32_t * )params; n--; p1++, p2++ ) {
-				uint32_to_char( *p2, ( unsigned char * )p1 );
-			}
-		} else {
-			*( ( uint8_t * )cmd ) = len = PTP_USB_BULK_HDR_LEN;
+		for( uint32_t *p1 = ( uint32_t * )( cmd + PTP_CONTAINER_PAYLOAD_OFF ), *p2 = ( uint32_t * )data; n--; p1++, p2++ ) {
+			uint32_to_char( *p2, ( unsigned char * )p1 );
 		}
-
-		rcode = pUsb->outTransfer( devAddress, epInfo[epDataOutIndex].epAddr, len, cmd );
-
-		if( rcode ) {
-			PTPTRACE2( "Transaction: Command block send error", rcode );
-			return PTP_RC_GeneralError;
-		}
+	} else {
+		*( ( uint8_t * )cmd ) = len = PTP_USB_BULK_HDR_LEN;
 	}
+
+	return pUsb->outTransfer( devAddress, epInfo[epDataOutIndex].epAddr, len, cmd );
+}
+
+uint16_t PTP::Transaction( uint16_t opcode, OperFlags *flags, uint32_t *params = NULL, void *pVoid = NULL ) {
+	uint8_t rcode = SendCommandPacket( opcode, flags->opParams, params );
+	if( rcode ) {
+		PTPTRACE2( "Transaction: Command block send error", rcode );
+		return PTP_RC_GeneralError;
+	}
+
 	{
 		uint8_t		data[PTP_MAX_RX_BUFFER_LEN];
 
@@ -978,10 +977,7 @@ uint16_t PTP::CaptureImage() {
 	bool					occured;
 
 	while( 1 ) {
-		// multiple objects can be added depending on current camera shooting mode
-		if( ( occured = EventWait( sizeof( PTPUSBEventContainer ), ( uint8_t * )&evnt, 500 ) )/* && evnt.code == PTP_EC_ObjectAdded*/ )
-			//	PTPTRACE("CaptureImage: New object added.\r\n");
-		{
+		if( ( occured = EventWait( sizeof( PTPUSBEventContainer ), ( uint8_t * )&evnt, 500 ) ) ) {
 			if( !occured ) {
 				PTPTRACE( "CaptureImage: Timeout ellapsed.\r\n" );
 				return PTP_RC_Undefined;
@@ -999,9 +995,7 @@ uint16_t PTP::CaptureImage() {
 					return PTP_RC_StoreFull;
 			}
 		}
-		//if (evnt.code == PTP_EC_CaptureComplete)
-		//	break;
-	} // while (1)
+	}
 }
 
 uint16_t PTP::GetStorageIDs( PTPReadParser *parser ) {
