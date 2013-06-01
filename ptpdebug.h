@@ -23,7 +23,7 @@ e-mail   :  support@circuitsathome.com
 #include "hexdump.h"
 #include "message.h"
 
-#define PTPDEBUG
+//#define PTPDEBUG
 
 //#define Message(m,r) (ErrorMessage<uint16_t>((m),(r)))
 

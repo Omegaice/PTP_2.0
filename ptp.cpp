@@ -386,20 +386,24 @@ uint8_t PTP::SendDataPacket( const uint16_t opcode, const uint32_t size, void* d
 	memcpy( buffer + PTP_CONTAINER_OPCODE_OFF, &opcode, sizeof(uint16_t));
 	memcpy( buffer + PTP_CONTAINER_TRANSID_OFF, &idTransaction, sizeof(uint32_t));
 
-	#ifdef PTPDEBUG
-		Serial.print("Packet[ ");
-		Serial.print(length);
-		Serial.print(",");
-		Serial.print(value);
-		Serial.print(",");
-		Serial.print(opcode);
-		Serial.print(",");
-		Serial.print(idTransaction);
-		Serial.println(" ]");
+#ifdef PTPDEBUG
+	Serial.print("Packet[ ");
+	Serial.print(length);
+	Serial.print(",");
+	Serial.print(value);
+	Serial.print(",");
+	Serial.print(opcode);
+	Serial.print(",");
+	Serial.print(idTransaction);
+	Serial.println(" ]");
 #endif
 	if( data != 0 ){
-		memcpy( buffer + PTP_USB_BULK_HDR_LEN, data, size);
-		#ifdef PTPDEBUG
+		uint16_t MaxSize = PTP_MAX_RX_BUFFER_LEN;
+		const uint16_t packet_data_space = MaxSize - PTP_USB_BULK_HDR_LEN;
+
+		if( size < packet_data_space ){
+			memcpy( buffer + PTP_USB_BULK_HDR_LEN, data, size);
+#ifdef PTPDEBUG
 			Serial.print("Data(");
 			Serial.print(size);
 			Serial.print(") [ ");
@@ -408,16 +412,67 @@ uint8_t PTP::SendDataPacket( const uint16_t opcode, const uint32_t size, void* d
 				Serial.print(",");
 			}
 			Serial.println(" ]");
-		#endif
+#endif
+
+			return pUsb->outTransfer( devAddress, epInfo[epDataOutIndex].epAddr, length, buffer );
+		}else{
+			// Send as much as possible
+			memcpy( buffer + PTP_USB_BULK_HDR_LEN, data, packet_data_space);
+#ifdef PTPDEBUG
+			Serial.print("Data(");
+			Serial.print(packet_data_space);
+			Serial.print(") [ ");
+			for( int i = 0; i < packet_data_space; i++ ){
+				Serial.print(buffer[i+12]);
+				Serial.print(",");
+			}
+			Serial.println(" ]");
+#endif
+
+			uint8_t rcode = pUsb->outTransfer( devAddress, epInfo[epDataOutIndex].epAddr, MaxSize, buffer );
+			if( rcode ){
+				return rcode;
+			}
+
+			// Loop to send remaining data
+			uint32_t remaining = length - MaxSize;
+			while( remaining > 0 ){
+				// Calcuate how much more we need
+				uint16_t to_send = (remaining > MaxSize) ? MaxSize : remaining;
+
+				uint8_t* uData = (uint8_t*)data;
+
+				memset( buffer, 0, sizeof(buffer) );
+				memcpy( buffer, &uData[size - remaining], to_send);
+#ifdef PTPDEBUG
+			Serial.print("Data(");
+			Serial.print(to_send);
+			Serial.print(") [ ");
+			for( int i = 0; i < to_send; i++ ){
+				Serial.print(buffer[i]);
+				Serial.print(",");
+			}
+			Serial.println(" ]");
+#endif
+
+				rcode = pUsb->outTransfer( devAddress, epInfo[epDataOutIndex].epAddr, (uint8_t)to_send, buffer );
+				if( rcode ){
+					return rcode;
+				}
+
+				remaining -= to_send;
+			}
+
+			// Sent successufully
+			return 0;
+		}
 	}
 
 	// Send Data
 	return pUsb->outTransfer( devAddress, epInfo[epDataOutIndex].epAddr, (uint8_t)length, buffer );
 }
 
-uint16_t PTP::Transaction( uint16_t opcode, OperFlags *flags, uint32_t *params = NULL, void *pVoid = NULL ) {
-	Serial.println(flags->dataSize);
-
+uint16_t PTP::Transaction( uint16_t opcode, OperFlags *flags, uint32_t *params = NULL, const uint32_t data_size = 0, void *pVoid = NULL ) {
 	uint8_t rcode = SendCommandPacket( opcode, flags->opParams, params );
 	if( rcode != 0 ) {
 		PTPTRACE2( "Transaction: Command block send error", rcode );
@@ -425,7 +480,7 @@ uint16_t PTP::Transaction( uint16_t opcode, OperFlags *flags, uint32_t *params =
 	}
 
 	if( flags->txOperation ) {
-		uint8_t rcode = SendDataPacket( opcode, flags->dataSize, pVoid );
+		uint8_t rcode = SendDataPacket( opcode, data_size, pVoid );
 		if( rcode != 0 ) {
 			PTPTRACE2( "Transaction: Command block send error", rcode );
 			return PTP_RC_GeneralError;
@@ -639,7 +694,7 @@ uint16_t PTP::GetObject( uint32_t handle, PTPReadParser *parser ) {
 
 	params[0] = handle;
 
-	return Transaction( PTP_OC_GetObject, &flags, params, parser );
+	return Transaction( PTP_OC_GetObject, &flags, params, 0, parser );
 }
 
 uint16_t PTP::GetThumb( uint32_t handle, PTPReadParser *parser ) {
@@ -648,7 +703,7 @@ uint16_t PTP::GetThumb( uint32_t handle, PTPReadParser *parser ) {
 
 	params[0] = handle;
 
-	return Transaction( PTP_OC_GetThumb, &flags, params, parser );
+	return Transaction( PTP_OC_GetThumb, &flags, params, 0, parser );
 }
 
 uint16_t PTP::DeleteObject( uint32_t handle, uint16_t format ) {
@@ -761,7 +816,7 @@ uint16_t PTP::CloseSession() {
 
 uint16_t PTP::GetDeviceInfo( PTPReadParser *parser ) {
 	OperFlags	flags = { 0, 0, 0, 1, 1, 0 };
-	return Transaction( PTP_OC_GetDeviceInfo, &flags, NULL, parser );
+	return Transaction( PTP_OC_GetDeviceInfo, &flags, NULL, 0, parser );
 }
 
 uint16_t PTP::GetObjectInfo( uint32_t handle, PTPReadParser *parser ) {
@@ -769,7 +824,7 @@ uint16_t PTP::GetObjectInfo( uint32_t handle, PTPReadParser *parser ) {
 	uint32_t	params[1];
 	params[0] = handle;
 
-	return Transaction( PTP_OC_GetObjectInfo, &flags, params, parser );
+	return Transaction( PTP_OC_GetObjectInfo, &flags, params, 0, parser );
 }
 
 uint16_t PTP::GetDevicePropDesc( const uint16_t pcode, PTPReadParser *parser ) {
@@ -778,7 +833,7 @@ uint16_t PTP::GetDevicePropDesc( const uint16_t pcode, PTPReadParser *parser ) {
 
 	params[0] = ( uint32_t )pcode;
 
-	return Transaction( PTP_OC_GetDevicePropDesc, &flags, params, parser );
+	return Transaction( PTP_OC_GetDevicePropDesc, &flags, params, 0, parser );
 }
 
 uint16_t PTP::GetDevicePropValue( const uint16_t pcode, PTPReadParser *parser ) {
@@ -787,7 +842,7 @@ uint16_t PTP::GetDevicePropValue( const uint16_t pcode, PTPReadParser *parser ) 
 
 	params[0] = ( uint32_t )pcode;
 
-	return Transaction( PTP_OC_GetDevicePropValue, &flags, params, parser );
+	return Transaction( PTP_OC_GetDevicePropValue, &flags, params, 0, parser );
 }
 
 uint16_t PTP::GetDevicePropValue( const uint16_t pcode, uint8_t &val ) {
@@ -798,7 +853,7 @@ uint16_t PTP::GetDevicePropValue( const uint16_t pcode, uint8_t &val ) {
 
 	params[0] = ( uint32_t )pcode;
 
-	return Transaction( PTP_OC_GetDevicePropValue, &flags, params, &val );
+	return Transaction( PTP_OC_GetDevicePropValue, &flags, params, 0, &val );
 }
 
 uint16_t PTP::GetDevicePropValue( const uint16_t pcode, uint16_t &val ) {
@@ -809,7 +864,7 @@ uint16_t PTP::GetDevicePropValue( const uint16_t pcode, uint16_t &val ) {
 
 	params[0] = pcode;
 
-	if( ( ptp_error = Transaction( PTP_OC_GetDevicePropValue, &flags, params, buf ) ) == PTP_RC_OK ) {
+	if( ( ptp_error = Transaction( PTP_OC_GetDevicePropValue, &flags, params, 0, buf ) ) == PTP_RC_OK ) {
 		val = buf[6];
 	}
 
@@ -824,7 +879,7 @@ uint16_t PTP::GetDevicePropValue( const uint16_t pcode, uint32_t &val ) {
 
 	params[0] = pcode;
 
-	if( ( ptp_error = Transaction( PTP_OC_GetDevicePropValue, &flags, params, buf ) ) == PTP_RC_OK ) {
+	if( ( ptp_error = Transaction( PTP_OC_GetDevicePropValue, &flags, params, 0, buf ) ) == PTP_RC_OK ) {
 		val = buf[3];
 	}
 
@@ -840,7 +895,7 @@ uint16_t PTP::GetDevicePropValue( const uint16_t pcode, int8_t &val ) {
 
 	params[0] = ( uint32_t )pcode;
 
-	if( ( ptp_error = Transaction( PTP_OC_GetDevicePropValue, &flags, params, buf ) ) == PTP_RC_OK ) {
+	if( ( ptp_error = Transaction( PTP_OC_GetDevicePropValue, &flags, params, 0, buf ) ) == PTP_RC_OK ) {
 		val = buf[12];
 	}
 
@@ -855,7 +910,7 @@ uint16_t PTP::GetDevicePropValue( const uint16_t pcode, int16_t &val ) {
 
 	params[0] = pcode;
 
-	if( ( ptp_error = Transaction( PTP_OC_GetDevicePropValue, &flags, params, buf ) ) == PTP_RC_OK ) {
+	if( ( ptp_error = Transaction( PTP_OC_GetDevicePropValue, &flags, params, 0, buf ) ) == PTP_RC_OK ) {
 		val = buf[6];
 	}
 
@@ -870,7 +925,7 @@ uint16_t PTP::GetDevicePropValue( const uint16_t pcode, int32_t &val ) {
 
 	params[0] = pcode;
 
-	if( ( ptp_error = Transaction( PTP_OC_GetDevicePropValue, &flags, params, buf ) ) == PTP_RC_OK ) {
+	if( ( ptp_error = Transaction( PTP_OC_GetDevicePropValue, &flags, params, 0, buf ) ) == PTP_RC_OK ) {
 		val = buf[3];
 	}
 
@@ -885,7 +940,7 @@ uint16_t PTP::GetDevicePropValue( const uint16_t pcode, uint8_t* val ) {
 
 	params[0] = pcode;
 
-	return Transaction( PTP_OC_GetDevicePropValue, &flags, params, val );
+	return Transaction( PTP_OC_GetDevicePropValue, &flags, params, 0, val );
 }
 
 uint16_t PTP::SetDevicePropValue( uint16_t pcode, uint8_t val ) {
@@ -896,7 +951,7 @@ uint16_t PTP::SetDevicePropValue( uint16_t pcode, uint8_t val ) {
 	params[0]	= ( uint32_t )pcode;
 	value		= val;
 
-	return Transaction( PTP_OC_SetDevicePropValue, &flags, params, ( void * )&value );
+	return Transaction( PTP_OC_SetDevicePropValue, &flags, params, 1, ( void * )&value );
 }
 
 uint16_t PTP::SetDevicePropValue( uint16_t pcode, uint16_t val ) {
@@ -907,7 +962,7 @@ uint16_t PTP::SetDevicePropValue( uint16_t pcode, uint16_t val ) {
 	params[0]	= ( uint32_t )pcode;
 	value		= val;
 
-	return Transaction( PTP_OC_SetDevicePropValue, &flags, params, ( void * )&value );
+	return Transaction( PTP_OC_SetDevicePropValue, &flags, params, 2, ( void * )&value );
 }
 
 uint16_t PTP::SetDevicePropValue( uint16_t pcode, uint32_t val ) {
@@ -918,7 +973,7 @@ uint16_t PTP::SetDevicePropValue( uint16_t pcode, uint32_t val ) {
 	params[0]	= ( uint32_t )pcode;
 	value		= val;
 
-	return Transaction( PTP_OC_SetDevicePropValue, &flags, params, ( void * )&value );
+	return Transaction( PTP_OC_SetDevicePropValue, &flags, params, 4, ( void * )&value );
 }
 
 uint16_t PTP::SetDevicePropValue( uint16_t pcode, int8_t val ) {
@@ -929,7 +984,7 @@ uint16_t PTP::SetDevicePropValue( uint16_t pcode, int8_t val ) {
 	params[0]	= ( uint32_t )pcode;
 	value		= val;
 
-	return Transaction( PTP_OC_SetDevicePropValue, &flags, params, ( void * )&value );
+	return Transaction( PTP_OC_SetDevicePropValue, &flags, params, 1, ( void * )&value );
 }
 
 uint16_t PTP::SetDevicePropValue( uint16_t pcode, int16_t val ) {
@@ -940,7 +995,7 @@ uint16_t PTP::SetDevicePropValue( uint16_t pcode, int16_t val ) {
 	params[0]	= ( uint32_t )pcode;
 	value		= val;
 
-	return Transaction( PTP_OC_SetDevicePropValue, &flags, params, ( void * )&value );
+	return Transaction( PTP_OC_SetDevicePropValue, &flags, params, 2, ( void * )&value );
 }
 
 uint16_t PTP::SetDevicePropValue( uint16_t pcode, int32_t val ) {
@@ -951,7 +1006,7 @@ uint16_t PTP::SetDevicePropValue( uint16_t pcode, int32_t val ) {
 	params[0]	= ( uint32_t )pcode;
 	value		= val;
 
-	return Transaction( PTP_OC_SetDevicePropValue, &flags, params, ( void * )&value );
+	return Transaction( PTP_OC_SetDevicePropValue, &flags, params, 4, ( void * )&value );
 }
 
 uint16_t PTP::SetDevicePropValue( const uint16_t pcode, const uint8_t length, uint8_t* val ){
@@ -960,9 +1015,7 @@ uint16_t PTP::SetDevicePropValue( const uint16_t pcode, const uint8_t length, ui
 	uint32_t	params[1];
 	params[0]	= ( uint32_t )pcode;
 
-
-	Serial.println("SetString");
-	return Transaction( PTP_OC_SetDevicePropValue, &flags, params, ( void * )val );
+	return Transaction( PTP_OC_SetDevicePropValue, &flags, params, length, ( void * )val );
 }
 
 uint16_t PTP::ResetDevicePropValue( const uint16_t pcode ) {
@@ -988,7 +1041,7 @@ uint16_t PTP::GetStorageInfo( uint32_t storage_id, PTPReadParser *parser ) {
 	uint32_t	params[1];
 	params[0]	= storage_id;
 
-	return Transaction( PTP_OC_GetStorageInfo, &flags, params, parser );
+	return Transaction( PTP_OC_GetStorageInfo, &flags, params, 0, parser );
 }
 
 uint16_t PTP::FormatStore( uint32_t storage_id, uint32_t fsformat ) {
@@ -1037,7 +1090,7 @@ uint16_t PTP::CaptureImage() {
 
 uint16_t PTP::GetStorageIDs( PTPReadParser *parser ) {
 	OperFlags	flags = { 0, 0, 0, 1, 1, 0 };
-	return Transaction( PTP_OC_GetStorageIDs, &flags, NULL, parser );
+	return Transaction( PTP_OC_GetStorageIDs, &flags, NULL, 0, parser );
 }
 
 uint16_t PTP::GetStorageIDs( uint8_t bufsize, uint8_t *pbuf ) {
@@ -1045,7 +1098,7 @@ uint16_t PTP::GetStorageIDs( uint8_t bufsize, uint8_t *pbuf ) {
 
 	flags.dataSize = bufsize;
 
-	return Transaction( PTP_OC_GetStorageIDs, &flags, NULL, pbuf );
+	return Transaction( PTP_OC_GetStorageIDs, &flags, NULL, 0, pbuf );
 }
 
 uint16_t PTP::GetObjectHandles( uint32_t storage_id, uint16_t format, uint16_t assoc, PTPReadParser *parser ) {
@@ -1056,5 +1109,5 @@ uint16_t PTP::GetObjectHandles( uint32_t storage_id, uint16_t format, uint16_t a
 	params[1] = ( uint32_t )format;
 	params[2] = ( uint32_t )assoc;
 
-	return Transaction( PTP_OC_GetObjectHandles, &flags, params, parser );
+	return Transaction( PTP_OC_GetObjectHandles, &flags, params, 0, parser );
 }

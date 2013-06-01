@@ -118,7 +118,7 @@ class PTP : public USBDeviceConfig {
 
 		uint8_t SendCommandPacket( const uint16_t opcode, const uint8_t parameters, uint32_t *data );
 		uint8_t SendDataPacket( const uint16_t opcode, const uint32_t size, void* data );
-		uint16_t Transaction( uint16_t opcode, OperFlags *flags, uint32_t *params, void *pVoid );
+		uint16_t Transaction( uint16_t opcode, OperFlags *flags, uint32_t *params, const uint32_t data_size, void *pVoid );
 
 	public:
 		PTP( USB *pusb, PTPStateHandlers *s );
