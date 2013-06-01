@@ -53,6 +53,15 @@ class PTPStateHandlers {
 		virtual void OnDeviceBusyState( PTP *ptp );
 };
 
+struct PTPPacket {
+	uint32_t length;
+	uint16_t type;
+	uint16_t opcode;
+	uint16_t transaction;
+
+	uint8_t* data;
+	uint32_t data_size;
+};
 
 class PTP : public USBDeviceConfig {
 		uint8_t		theState;
@@ -152,12 +161,14 @@ class PTP : public USBDeviceConfig {
 		uint16_t GetDevicePropValue( const uint16_t pcode, int8_t  &val );
 		uint16_t GetDevicePropValue( const uint16_t pcode, int16_t &val );
 		uint16_t GetDevicePropValue( const uint16_t pcode, int32_t &val );
+		uint16_t GetDevicePropValue( const uint16_t pcode, uint8_t* val );
 		uint16_t SetDevicePropValue( const uint16_t pcode, uint8_t  val );
 		uint16_t SetDevicePropValue( const uint16_t pcode, uint16_t val );
 		uint16_t SetDevicePropValue( const uint16_t pcode, uint32_t val );
 		uint16_t SetDevicePropValue( const uint16_t pcode, int8_t  val );
 		uint16_t SetDevicePropValue( const uint16_t pcode, int16_t val );
 		uint16_t SetDevicePropValue( const uint16_t pcode, int32_t val );
+		uint16_t SetDevicePropValue( const uint16_t pcode, const uint8_t length, uint8_t* val );
 		uint16_t ResetDevicePropValue( const uint16_t pcode );
 		uint16_t GetStorageIDs( PTPReadParser *parser );
 		uint16_t GetStorageIDs( uint8_t bufsize, uint8_t *pbuf );
