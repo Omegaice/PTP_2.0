@@ -70,38 +70,3 @@ uint8_t NikonDSLR::Init( uint8_t parent, uint8_t port, bool lowspeed ) {
 		return USB_DEV_CONFIG_ERROR_DEVICE_NOT_SUPPORTED;
 	}
 }
-
-uint16_t NikonDSLR::Capture() {
-	return Operation( NK_OC_Capture, 0, NULL );
-}
-
-uint16_t NikonDSLR::CaptureInSDRAM() {
-	return Operation( NK_OC_CaptureInSDRAM, 0, NULL );
-}
-
-uint16_t NikonDSLR::EventCheck( PTPReadParser *parser ) {
-	uint16_t	ptp_error	= PTP_RC_GeneralError;
-	OperFlags	flags		= { 0, 0, 0, 1, 1, 0 };
-
-	if( ( ptp_error = Transaction( NK_OC_CheckEvent, &flags, NULL, parser ) ) != PTP_RC_OK ) {
-		PTPTRACE2( "EventCheck error:", ptp_error );
-	}
-
-	return ptp_error;
-}
-
-uint16_t NikonDSLR::GetLiveViewImage( PTPReadParser *parser ) {
-	OperFlags	flags		= { 0, 0, 0, 1, 1, 0 };
-
-	return Transaction( PTP_OC_NIKON_GetLiveViewImg, &flags, NULL, parser );
-}
-
-uint16_t NikonDSLR::MoveFocus( uint8_t direction, uint16_t step ) {
-	OperFlags	flags		= { 2, 0, 0, 0, 0, 0 };
-
-	uint32_t	params[2];
-	params[0]	= ( uint32_t )direction;
-	params[1]	= ( uint32_t )step;
-
-	return Transaction( PTP_OC_NIKON_MfDrive, &flags, params, NULL );
-}

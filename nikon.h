@@ -190,13 +190,6 @@ class NikonDSLR : public PTP {
 		NikonDSLR( USB *pusb, PTPStateHandlers *s );
 
 		virtual uint8_t Init( uint8_t parent, uint8_t port, bool lowspeed );
-
-		uint16_t Capture();
-		uint16_t CaptureInSDRAM();
-
-		uint16_t EventCheck( PTPReadParser *parser );
-		uint16_t GetLiveViewImage( PTPReadParser *parser );
-		uint16_t MoveFocus( uint8_t direction, uint16_t step );
 };
 
 
