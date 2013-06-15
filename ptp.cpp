@@ -497,7 +497,7 @@ uint16_t PTP::Transaction( uint16_t opcode, OperFlags *flags, uint32_t *params =
 		uint8_t result = pUsb->inTransfer( devAddress, epInfo[epDataInIndex].epAddr, &MaxSize, buffer );
 
 		if( result ){
-			PTPTRACE( "Fatal USB Error\r\n" );
+			Serial.println( "Fatal USB Error\r\n" );
 
 			// in some cases NAK handling might be necessary
 			PTPTRACE2( "Transaction: Response recieve error", rcode );
@@ -1056,7 +1056,7 @@ uint16_t PTP::FormatStore( uint32_t storage_id, uint32_t fsformat ) {
 
 uint16_t PTP::CaptureImage() {
 	uint16_t	ptp_error = PTP_RC_GeneralError;
-	uint32_t	params[2] = {0, 0x00003801};
+	uint32_t	params[2] = {0, 0x3800};
 	OperFlags	flags = { 2, 0, 0, 0 };
 
 	if( ( ptp_error = Transaction( PTP_OC_InitiateCapture, &flags, params ) ) != PTP_RC_OK ) {
